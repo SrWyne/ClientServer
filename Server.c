@@ -9,10 +9,10 @@
 #include <unistd.h>
 #include <netinet/tcp.h>
 
-#define BUFFER 1024
+#define BUFFER 4096
 #define PORT 3000
 
-unsigned char key [16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+unsigned char key[16] = {'1','0', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 unsigned char iv[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
 int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[]){
@@ -36,11 +36,11 @@ int Decrypt(unsigned char in_cipher[], int len_cipher, unsigned char out_plain[]
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     int total, len;
 
-    EVP_EncryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv);
-    EVP_EncryptUpdate(ctx, out_plain, &len, in_cipher, len_cipher);
-    total = len;
+    EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv);
+    EVP_DecryptUpdate(ctx, out_plain, &len, in_cipher, len_cipher);
+    total=len;
 
-    EVP_EncryptFinal_ex(ctx, out_plain + total, &len);
+    EVP_DecryptFinal_ex(ctx, out_plain + len, &len);
     total+=len;
 
     EVP_CIPHER_CTX_free(ctx);
@@ -93,27 +93,20 @@ void restore_terminal(){
     tcsetattr(0, TCSANOW, &old);
 }
 
-void sig_terminal(int sig){
-    restore_terminal();
-    printf("Saindo...");
-    exit(0);
-
-}
-
 void setup_terminal(){
     struct termios newt;
 
     tcgetattr(0, &old);
     atexit(restore_terminal);
-    signal(SIGINT, sig_terminal);
 
     newt = old;
-    newt.c_cflag &= ~(ICANON | ECHO);
+    newt.c_lflag &= ~(ICANON | ECHO);
 
     tcsetattr(0, TCSANOW, &newt);
 }
 
 int main(){
+    signal(SIGTSTP, SIG_IGN);
     int server, client;
 
     struct sockaddr_in addr;
@@ -141,6 +134,9 @@ int main(){
         printf("Conectado!\n");
 
         setup_terminal();
+        unsigned char buff[BUFFER];
+        unsigned char encrypted[BUFFER];
+        unsigned char decrypted[BUFFER];
 
         while(1){
 
@@ -157,8 +153,6 @@ int main(){
             }
 
             if(FD_ISSET(0, &fds)){
-                unsigned char buff[BUFFER];
-                unsigned char encrypted[BUFFER];
 
                 int bytes = read(0, buff, sizeof(buff));
 
@@ -167,12 +161,10 @@ int main(){
             }
 
             if(FD_ISSET(client, &fds)){
-                unsigned char buff[BUFFER];
-                unsigned char decrypted[BUFFER];
 
                 int r = recv_packet(client, buff);
 
-                int dec_len = Decrypt(buff, sizeof(buff), decrypted);
+                int dec_len = Decrypt(buff, r, decrypted);
                 write(1, decrypted, dec_len);
             }
 

