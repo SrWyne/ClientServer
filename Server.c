@@ -63,7 +63,7 @@ int recv_packet(int sock, unsigned char buf[]){
     int size_to_network;
     int size_to_host;
 
-    recv_full(sock, &size_to_network, 4);
+    recv_full(sock, (unsigned char*)&size_to_network, 4);
 
     size_to_host = ntohl(size_to_network);
 
@@ -104,8 +104,8 @@ void setup_terminal(){
     struct termios newt;
 
     tcgetattr(0, &old);
-    atexit(sig_terminal);
-    signal(SIGINT, restore_terminal);
+    atexit(restore_terminal);
+    signal(SIGINT, sig_terminal);
 
     newt = old;
     newt.c_cflag &= ~(ICANON | ECHO);
