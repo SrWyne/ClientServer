@@ -127,16 +127,18 @@ int main(){
 
     addr.sin_port = htons(PORT);
     addr.sin_family = AF_INET;
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    addr.sin_addr.s_addr = INADDR_ANY;
 
     bind(server, (struct sockaddr*)&addr, sizeof(addr));
 
-    listen(server, 1);
+    listen(server, 2);
+    printf("Ouvindo na porta 3000...\n");
 
     while (1)
     {
         client = accept(server, NULL, NULL);
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+        printf("Conectado!\n");
 
         setup_terminal();
 
