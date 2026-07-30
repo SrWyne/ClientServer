@@ -26,7 +26,7 @@ int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[])
     EVP_EncryptFinal_ex(ctx, out_cipher + len, &len);
     total+=len;
 
-    EVP_CIPHER_free(ctx);
+    EVP_CIPHER_CTX_free(ctx);
 
     return total;
 
@@ -43,7 +43,7 @@ int Decrypt(unsigned char in_cipher[], int len_cipher, unsigned char out_plain[]
     EVP_EncryptFinal_ex(ctx, out_plain + total, &len);
     total+=len;
 
-    EVP_CIPHER_free(ctx);
+    EVP_CIPHER_CTX_free(ctx);
 
     return total;
 }
@@ -133,48 +133,55 @@ int main(){
 
     listen(server, 1);
 
-    client = accept(server, NULL, NULL);
-    setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
-
-    setup_terminal();
-
     while (1)
     {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(0, &fds);
-        FD_SET(client, &fds);
+        client = accept(server, NULL, NULL);
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-        int maxfds = client;
+        setup_terminal();
 
-        int r = select(maxfds+1, &fds, NULL, NULL, NULL);
-        if(r < 0){
-            return -1;
+        while(1){
+
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(0, &fds);
+            FD_SET(client, &fds);
+
+            int maxfds = client;
+
+            int r = select(maxfds+1, &fds, NULL, NULL, NULL);
+            if(r < 0){
+                return -1;
+            }
+
+            if(FD_ISSET(0, &fds)){
+                unsigned char buff[BUFFER];
+                unsigned char encrypted[BUFFER];
+
+                int bytes = read(0, buff, strlen(buff));
+
+                int enc_len = Encrypt(buff, bytes, encrypted);
+                send_packet(client, encrypted, enc_len);
+            }
+
+            if(FD_ISSET(client, &fds)){
+                unsigned char buff[BUFFER];
+                unsigned char decrypted[BUFFER];
+
+                int r = recv_packet(client, buff);
+
+                int dec_len = Decrypt(buff, sizeof(buff), decrypted);
+                write(1, decrypted, dec_len);
+            }
+
         }
 
-        if(FD_ISSET(0, &fds)){
-            unsigned char buff[BUFFER];
-            unsigned char encrypted[BUFFER];
+        restore_terminal();
+        shutdown(client, SHUT_RDWR);
 
-            int bytes = read(0, buff, strlen(buff));
-
-            int enc_len = Encrypt(buff, bytes, encrypted);
-            send_packet(client, encrypted, enc_len);
-        }
-
-        if(FD_ISSET(client, &fds)){
-            unsigned char buff[BUFFER];
-            unsigned char decrypted[BUFFER];
-
-            int r = recv_packet(client, buff);
-
-            int dec_len = Decrypt(buff, sizeof(buff), decrypted);
-            write(1, decrypted, dec_len);
-        }
-
+        close(client);
     }
 
-    close(client);
     close(server);
 
     return 0;

