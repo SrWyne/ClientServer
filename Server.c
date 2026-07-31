@@ -21,7 +21,7 @@ int Encrypt(unsigned char in_plain[], int len_plain, unsigned char out_cipher[])
 
     EVP_EncryptInit_ex(ctx, EVP_aes_128_cbc(), NULL, key, iv);
     EVP_EncryptUpdate(ctx, out_cipher, &len, in_plain, len_plain);
-    total = len;
+    total=len;
 
     EVP_EncryptFinal_ex(ctx, out_cipher + len, &len);
     total+=len;
@@ -53,6 +53,7 @@ int recv_full(int sock, unsigned char buff[], int len){
 
     while(total<len){
         int r = recv(sock, buff+total, len-total, 0);
+        if(r <= 0) return -1;
         total+=r;
     }
 
@@ -63,24 +64,34 @@ int recv_packet(int sock, unsigned char buf[]){
     int size_to_network;
     int size_to_host;
 
-    recv_full(sock, (unsigned char*)&size_to_network, 4);
+    if(recv_full(sock, (unsigned char*)&size_to_network, 4) != 4){
+        return -1;
+    }
 
     size_to_host = ntohl(size_to_network);
 
-    recv_full(sock, buf, size_to_host);
+    if(recv_full(sock, buf, size_to_host) <= 0){
+        return -1;
+    }
 
     return size_to_host;
 }
 
 int send_packet(int sock, unsigned char buff[], int len){
-    int size_to_netowrk = htonl(len);
+    int size_to_network = htonl(len);
 
-    send(sock, &size_to_netowrk, 4, 0);
-
+    int totalsize = 0;
     int total = 0;
+
+    while(totalsize<4){
+        int sen = send(sock, (unsigned char *)&size_to_network + totalsize, 4 - totalsize, 0);
+        if(sen<=0) return -1;
+        totalsize+=sen;
+    }
 
     while(total<len){
         int s = send(sock, buff+total, len-total, 0);
+        if(s <= 0) return -1;
         total+=s;
     }
 
@@ -122,16 +133,19 @@ int main(){
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    bind(server, (struct sockaddr*)&addr, sizeof(addr));
+    if(bind(server, (struct sockaddr*)&addr, sizeof(addr)) != 0){
+        printf("Err in Bind!\n");
+        return -1;
+    }
 
     listen(server, 2);
-    printf("Ouvindo na porta 3000...\n");
+    printf("Ouvindo na porta %d...\n", PORT);
 
     while (1)
     {
         client = accept(server, NULL, NULL);
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
-        printf("Conectado!\n");
+        printf("[+] Conectado!\n");
 
         setup_terminal();
         unsigned char buff[BUFFER];
@@ -156,15 +170,23 @@ int main(){
 
                 int bytes = read(0, buff, sizeof(buff));
 
+                if(bytes <= 0) break;
+
                 int enc_len = Encrypt(buff, bytes, encrypted);
-                send_packet(client, encrypted, enc_len);
+                if(enc_len<=0) break;
+
+                if(send_packet(client, encrypted, enc_len) != 0) break;
             }
 
             if(FD_ISSET(client, &fds)){
 
                 int r = recv_packet(client, buff);
 
+                if(r<=0) break;
+
                 int dec_len = Decrypt(buff, r, decrypted);
+                if(dec_len <= 0) break;
+
                 write(1, decrypted, dec_len);
             }
 
@@ -175,9 +197,7 @@ int main(){
     }
 
     close(server);
+    printf("Conexão encerrada!\n");
 
     return 0;
 }
-
-
-

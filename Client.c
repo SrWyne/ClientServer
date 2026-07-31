@@ -57,6 +57,7 @@ int recv_full(int s, unsigned char buff[], int len){
 
     while(total < len){
         int r = recv(s, buff+total, len-total, 0);
+        if(r <= 0) return -1;
         total+=r;
     }
 
@@ -66,25 +67,35 @@ int recv_full(int s, unsigned char buff[], int len){
 int recv_packet(int s, unsigned char buff[]){
     int size_to_network, size_to_host;
 
-    recv_full(s, (unsigned char*)&size_to_network, 4);
+    if(recv_full(s, (unsigned char*)&size_to_network, 4) != 4){
+        return -1;
+    }
 
     size_to_host = ntohl(size_to_network);
 
-    recv_full(s, buff, size_to_host);
+    if(recv_full(s, buff, size_to_host) <= 0){
+        return -1;
+    }
 
     return size_to_host;
 }
 
 int send_packet(int s, unsigned char buff[], int len){
     int size_to_network = htonl(len);
-
-    send(s, &size_to_network, 4, 0);
-
+    int totalsize = 0;
     int total = 0;
+
+    while(totalsize<4){
+        int sen = send(s, (unsigned char *)&size_to_network + totalsize, 4 - totalsize, 0);
+        if(sen<=0) return -1;
+        totalsize+=sen;
+    }
+
 
     while (total<len)
     {
         int sent = send(s, buff+total, len-total, 0);
+        if(sent<=0) return -1;
         total+=sent;
     }
 
@@ -145,15 +156,24 @@ void run_session(int sock){
         if(FD_ISSET(sock, &fds)){
             int bytes = recv_packet(sock, buff);
 
+            if(bytes<=0) break;
+
             int dec_len = Decrypt(buff, bytes, dec);
+
+            if(dec_len<=0) break;
             write(master, dec, dec_len);
         }
 
         if(FD_ISSET(master, &fds)){
             int bytes = read(master, buff, sizeof(buff));
 
+            if(bytes<=0) break;
+
             int enc_len = Encrypt(buff, bytes, enc);
-            send_packet(sock, enc, enc_len);
+
+            if(enc_len<=0) break;
+            if(send_packet(sock, enc, enc_len) != 0) break;
+  
         }
 
     }
@@ -206,7 +226,7 @@ int main(){
 
         if(connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0){
             close(sock);
-            sleep(3);
+            sleep(5);
             continue;
         }
 
