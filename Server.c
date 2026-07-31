@@ -194,6 +194,7 @@ int main(){
 
         restore_terminal();
         close(client);
+        break;
     }
 
     close(server);
