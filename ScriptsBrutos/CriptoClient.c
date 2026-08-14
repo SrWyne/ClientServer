@@ -1,3 +1,5 @@
+//Simple ==Client/Server==
+
 #define _GNU_SOURCE
 
 #include <stdlib.h>
@@ -18,7 +20,7 @@
 
 #define BUFFER 4096
 #define PORT 3000
-#define IP "192.168.0.24"
+#define IP "192.168.0.100"
 
 #define KEY_SIZE 32
 #define NONCE_SIZE 12
@@ -285,35 +287,7 @@ void run_session(int sock){
 
 }
 
-int daemonize(){
-    pid_t pid = fork();
-    if(pid > 0) exit(0);
-    if(pid < 0) exit(1);
-    setsid();
-
-    signal(SIGCHLD, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
-
-    pid = fork();
-    if(pid > 0) exit(0);
-    if(pid < 0) exit(1);
-
-    umask(0);
-    chdir("/home");
-
-    close(0);
-    close(1);
-    close(2);
-
-    open("/dev/null", O_RDWR);
-    dup(0);
-    dup(0);
-}
-
-
 int main(){
-
-    daemonize();
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
