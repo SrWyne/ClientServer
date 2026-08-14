@@ -16,15 +16,16 @@ The implementation focuses on:
 * Terminal configuration (`termios`)
 * Multiplexed I/O using `select()`
 * Packet framing
-* AES-128-CBC encryption with OpenSSL EVP API
-* Daemon creation
+* AES-256-GCM authenticated encryption with OpenSSL EVP API
+* Nonce generation and transmission
+* GCM authentication tags
 * Remote shell interaction
 
 ---
 
 # Project Structure
 
-```
+```text
 .
 ├── client.c
 ├── server.c
@@ -37,11 +38,12 @@ The implementation focuses on:
 
 * TCP client/server communication
 * Interactive remote shell
-* AES-128-CBC encrypted traffic
+* AES-256-GCM encrypted traffic
+* Authenticated encryption using GCM authentication tags
+* Unique nonce for encrypted messages
 * Packet framing with size header
-* Non-blocking I/O using `select()`
+* Multiplexed I/O using `select()`
 * Linux pseudo-terminal (PTY)
-* Daemonized client
 * Terminal raw mode on the server
 * Automatic reconnection
 
@@ -56,10 +58,13 @@ Responsibilities:
 * Creates a listening socket
 * Accepts client connections
 * Reads keyboard input
-* Encrypts outgoing data
+* Encrypts outgoing data using AES-256-GCM
+* Generates a nonce for encryption
+* Generates and sends the GCM authentication tag
 * Sends encrypted packets
 * Receives encrypted packets
-* Decrypts received data
+* Verifies the authentication tag
+* Decrypts authenticated data
 * Displays shell output
 
 ### Main APIs
@@ -80,16 +85,16 @@ Responsibilities:
 
 The server places the terminal into **raw mode**.
 
-This disables:
+This disables behavior such as:
 
-* Canonical mode
+* Canonical input processing
 * Local echo
 
 allowing every keystroke to be transmitted immediately, similar to an SSH session.
 
 Functions used:
 
-```
+```text
 tcgetattr()
 tcsetattr()
 ```
@@ -98,123 +103,174 @@ tcsetattr()
 
 ## Packet Protocol
 
-Each packet is transmitted using the following format:
+Each encrypted message contains the information required by AES-256-GCM, including:
 
-```
-+------------+----------------------+
-| 4 bytes    | encrypted payload    |
-+------------+----------------------+
+* encrypted payload (ciphertext)
+* nonce
+* authentication tag
+* framing information used to determine packet boundaries
+
+Conceptually:
+
+```text
++------------+----------+----------------------+----------+
+| Length     | Nonce    | Ciphertext           | GCM Tag  |
++------------+----------+----------------------+----------+
 ```
 
-The first four bytes contain the payload length encoded in network byte order.
+The length field is encoded in network byte order.
 
 Functions:
 
 * `htonl()`
 * `ntohl()`
 
-This guarantees that complete encrypted messages are received even if TCP splits them into multiple segments.
+Packet framing is necessary because TCP provides a **byte stream**, not discrete application-level messages. A single `send()` does not guarantee that the receiver obtains the same amount of data in a single `recv()`.
 
 ---
 
-## Encryption
+# Encryption
 
-The server encrypts every outgoing packet using:
+Communication is protected using:
 
-```
-AES-128-CBC
+```text
+AES-256-GCM
 ```
 
 through the OpenSSL EVP interface.
 
-Functions:
+AES-256-GCM is an **AEAD (Authenticated Encryption with Associated Data)** mode. It provides both:
 
-* `EVP_EncryptInit_ex()`
-* `EVP_EncryptUpdate()`
-* `EVP_EncryptFinal_ex()`
+* **Confidentiality** — plaintext is encrypted into ciphertext.
+* **Integrity/authenticity** — modification of protected data can be detected through the authentication tag.
 
-Incoming packets are decrypted using:
+The encryption process uses three important cryptographic values:
 
-* `EVP_DecryptInit_ex()`
-* `EVP_DecryptUpdate()`
-* `EVP_DecryptFinal_ex()`
+```text
+Key + Nonce + Authentication Tag
+```
+
+### Key
+
+AES-256 uses a **256-bit (32-byte) symmetric key**.
+
+The same secret key is required for encryption and decryption.
+
+### Nonce
+
+GCM requires a nonce that must not be reused with the same key.
+
+A new nonce is therefore used for encrypted messages and transmitted together with the ciphertext so the receiving side can perform decryption.
+
+### Authentication Tag
+
+During encryption, GCM generates an authentication tag.
+
+The receiver supplies this tag during decryption. If the ciphertext or other authenticated data has been modified, authentication fails and the plaintext must be rejected.
+
+### Encryption
+
+The OpenSSL EVP encryption flow uses functions such as:
+
+```text
+EVP_EncryptInit_ex()
+EVP_EncryptUpdate()
+EVP_EncryptFinal_ex()
+EVP_CIPHER_CTX_ctrl()
+```
+
+The GCM authentication tag is obtained after encryption using the appropriate `EVP_CIPHER_CTX_ctrl()` operation.
+
+### Decryption
+
+Incoming packets are decrypted and authenticated using functions such as:
+
+```text
+EVP_DecryptInit_ex()
+EVP_DecryptUpdate()
+EVP_CIPHER_CTX_ctrl()
+EVP_DecryptFinal_ex()
+```
+
+Before finalizing decryption, the received authentication tag is supplied to the GCM context.
+
+If authentication fails, the received plaintext must not be trusted or processed.
 
 ---
 
 # Client
 
-The client runs silently as a background daemon.
-
-It continuously attempts to connect to the server.
+The client establishes a TCP connection with the server.
 
 After establishing the connection it:
 
 * launches a Bash shell inside a pseudo-terminal
 * forwards shell output to the server
-* executes commands received from the server
+* receives encrypted data from the server
+* authenticates and decrypts received packets
+* forwards received input to the pseudo-terminal
+* encrypts shell output using AES-256-GCM
 * reconnects automatically if the connection closes
 
----
-
-## Daemon Mode
-
-The client detaches from the terminal using the classic double-fork daemonization technique.
-
-Steps:
-
-1. First fork
-2. Create new session (`setsid`)
-3. Second fork
-4. Close stdin/stdout/stderr
-5. Redirect descriptors to `/dev/null`
-
-Functions:
-
-```
-fork()
-setsid()
-umask()
-chdir()
-dup()
-open()
-```
+The client **does not daemonize itself** and does not use the classic double-fork daemonization procedure.
 
 ---
 
 ## Pseudo Terminal (PTY)
 
-Instead of directly spawning `/bin/bash`, the client creates a pseudo-terminal using:
+Instead of directly connecting pipes to `/bin/bash`, the client creates a pseudo-terminal using:
 
-```
+```text
 forkpty()
 ```
 
-This provides behavior almost identical to an interactive Linux terminal.
+The PTY provides terminal semantics required by interactive shell applications.
 
-Advantages:
+Advantages include:
 
-* Proper prompts
+* Proper shell prompts
 * Interactive programs
-* Job control
-* Terminal behavior similar to SSH
+* Terminal-oriented input/output
+* Job-control support
+* Behavior closer to a normal interactive terminal
+
+`forkpty()` creates a pseudo-terminal pair and forks the process.
+
+The parent communicates through the **PTY master**, while the child receives a terminal environment through the **PTY slave**.
 
 ---
 
 ## Shell Execution
 
-Inside the PTY the client executes:
+Inside the PTY child process, the client executes:
 
-```
+```text
 /bin/bash
 ```
 
-using
+using:
 
-```
+```text
 execl()
 ```
 
-The shell output is read from the PTY master descriptor and transmitted through the encrypted socket.
+The shell process is therefore attached to the PTY slave.
+
+The client reads shell output through the PTY master descriptor, encrypts it and transmits it through the TCP connection.
+
+Data received from the server follows the opposite direction:
+
+```text
+TCP socket
+    ↓
+AES-256-GCM authentication/decryption
+    ↓
+PTY master
+    ↓
+PTY slave
+    ↓
+/bin/bash
+```
 
 ---
 
@@ -222,45 +278,70 @@ The shell output is read from the PTY master descriptor and transmitted through 
 
 The client simultaneously monitors:
 
-* socket
-* pseudo-terminal
+* TCP socket
+* pseudo-terminal master
 
-using
+using:
 
-```
+```text
 select()
 ```
 
-This allows bidirectional communication without busy waiting.
+This allows bidirectional communication without continuously polling each file descriptor in a busy loop.
+
+When the socket becomes readable, network data can be received and forwarded to the PTY.
+
+When the PTY becomes readable, shell output can be encrypted and transmitted to the server.
 
 ---
 
 # Communication Flow
 
-```
+```text
 Operator
      │
      ▼
 Server Keyboard
      │
-Encrypt
+     ▼
+AES-256-GCM
+Encrypt + Tag
      │
+     ▼
+Nonce + Ciphertext + Tag
+     │
+     ▼
 TCP Socket
      │
-Decrypt
+     ▼
+Verify Tag + Decrypt
      │
-Pseudo Terminal
+     ▼
+PTY Master
      │
+     ▼
+PTY Slave
+     │
+     ▼
 /bin/bash
      │
+     ▼
 Command Output
      │
-Encrypt
+     ▼
+AES-256-GCM
+Encrypt + Tag
      │
+     ▼
+Nonce + Ciphertext + Tag
+     │
+     ▼
 TCP Socket
      │
-Decrypt
+     ▼
+Verify Tag + Decrypt
      │
+     ▼
 Server Terminal
 ```
 
@@ -307,22 +388,27 @@ Client:
 
 # Limitations
 
-This project is intentionally simplified.
+This project is intentionally simplified and **must not be considered a replacement for SSH**.
 
 It does **not** implement:
 
 * SSH protocol
-* Key exchange
+* Secure key exchange
 * Public/private key authentication
 * Password authentication
 * Host verification
 * Forward secrecy
-* MAC authentication
 * Compression
 * Port forwarding
 * Multiplexing
 
-The symmetric AES key and IV are statically defined only for educational purposes.
+Although AES-GCM provides an authentication tag as part of its AEAD construction, this does **not** provide SSH-style peer authentication or identity verification.
+
+If the symmetric AES-256 key is statically defined in the source code, this is also an important security limitation. The project does not implement a secure protocol for negotiating or distributing that key.
+
+Nonce uniqueness is also critical when AES-GCM is used. **Reusing a nonce with the same AES key can severely compromise the security of GCM.**
+
+For these reasons, the cryptographic implementation exists primarily to demonstrate low-level concepts involving encrypted network communication and authenticated encryption.
 
 ---
 
@@ -332,15 +418,23 @@ This project demonstrates:
 
 * Linux sockets
 * TCP communication
+* TCP stream handling
 * Packet framing
 * OpenSSL EVP API
-* AES encryption
+* AES-256
+* Galois/Counter Mode (GCM)
+* Authenticated Encryption with Associated Data (AEAD)
+* Symmetric encryption keys
+* Nonces
+* Authentication tags
+* Ciphertext integrity verification
 * Network byte order
 * POSIX terminals
-* PTYs
-* Daemon processes
-* Process management
-* Multiplexed I/O
+* Pseudo-terminals (PTYs)
+* Process creation
+* Shell execution
+* File descriptors
+* Multiplexed I/O with `select()`
 * Remote shell architecture
 
 ---
